@@ -17,19 +17,19 @@ AWS IAM Role/Policy permission viewer — see what a role or policy can do.
 ```bash
 git clone <repo-url>
 cd cat-role
-pip install .
+pip3 install .
 ```
 
 For development (editable install):
 
 ```bash
-pip install -e .
+pip3 install -e .
 ```
 
 ### From PyPI (remote)
 
 ```bash
-pip install catrole
+pip3 install catrole
 ```
 
 ## Usage
