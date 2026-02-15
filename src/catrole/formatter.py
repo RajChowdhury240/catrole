@@ -23,6 +23,7 @@ def print_table(rows: list[dict], entity_type: str, entity_name: str, account: s
     table.add_column("#", style="dim", width=5, justify="right")
     table.add_column("Policy Name", style="bold white", max_width=30)
     table.add_column("Type", style="magenta", max_width=18)
+    table.add_column("Sid", style="white", max_width=30)
     table.add_column("Effect", max_width=8)
     table.add_column("Action", style="cyan", max_width=40)
     table.add_column("Resource", style="green", max_width=50)
@@ -38,6 +39,7 @@ def print_table(rows: list[dict], entity_type: str, entity_name: str, account: s
             str(idx),
             row["PolicyName"],
             row["PolicyType"],
+            row.get("Sid", "-"),
             effect_text,
             row["Action"],
             row["Resource"],
@@ -54,7 +56,7 @@ def save_csv(rows: list[dict], entity_type: str, account: str, name: str) -> str
     filename = generate_filename(entity_type, account, name)
     filepath = os.path.join(os.getcwd(), filename)
 
-    fieldnames = ["PolicyName", "PolicyType", "Effect", "Action", "Resource", "Condition"]
+    fieldnames = ["PolicyName", "PolicyType", "Sid", "Effect", "Action", "Resource", "Condition"]
 
     with open(filepath, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

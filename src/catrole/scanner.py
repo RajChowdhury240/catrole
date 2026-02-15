@@ -21,6 +21,7 @@ def _flatten_statements(policy_name: str, policy_type: str, document: dict) -> l
         statements = [statements]
 
     for stmt in statements:
+        sid = stmt.get("Sid", "-")
         effect = stmt.get("Effect", "")
         actions = stmt.get("Action", stmt.get("NotAction", []))
         resources = stmt.get("Resource", stmt.get("NotResource", []))
@@ -41,6 +42,7 @@ def _flatten_statements(policy_name: str, policy_type: str, document: dict) -> l
                 rows.append({
                     "PolicyName": policy_name,
                     "PolicyType": policy_type,
+                    "Sid": sid,
                     "Effect": effect,
                     "Action": f"NotAction: {action}" if is_not_action else action,
                     "Resource": f"NotResource: {resource}" if is_not_resource else resource,
