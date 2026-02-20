@@ -41,7 +41,7 @@ If `-R` is not provided, `catrole` reads the role name from `~/.catrole`.
 ### Setting a default assume role
 
 ```bash
-echo "my-readonly-role" > ~/.catrole
+echo "readonly-role" > ~/.catrole
 ```
 
 Once set, you can omit `-R` from all commands:
@@ -55,31 +55,31 @@ catrole -a 123456789012 -r MyAppRole
 ### Scan a role
 
 ```bash
-catrole -R my-readonly-role -a 123456789012 -r MyAppRole
+catrole -R readonly-role -a 123456789012 -r AppRole
 ```
 
 ### Scan a policy
 
 ```bash
-catrole -R my-readonly-role -a 123456789012 -p MyPolicy
+catrole -R readonly-role -a 123456789012 -p Policy
 ```
 
 ### Scan by ARN
 
 ```bash
-catrole -R my-readonly-role -A arn:aws:iam::123456789012:role/MyAppRole
+catrole -R readonly-role -A arn:aws:iam::123456789012:role/AppRole
 ```
 
 ### Search across all org accounts
 
 ```bash
-catrole -R my-readonly-role -s '*lambda*'
+catrole -R readonly-role -s '*lambda*'
 ```
 
 ### Search within a single account
 
 ```bash
-catrole -R my-readonly-role -s '*admin*' -a 123456789012
+catrole -R readonly-role -s '*admin*' -a 123456789012
 ```
 
 Results are printed as a table and automatically saved to a CSV file.
