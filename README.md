@@ -1,5 +1,7 @@
 # catrole
 
+![](banner.svg)
+
 > catrole is a python pip package which let's you:
 
 AWS IAM Role/Policy permission viewer — see what a role or policy can do.
