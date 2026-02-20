@@ -15,7 +15,7 @@ AWS IAM Role/Policy permission viewer — see what a role or policy can do.
 ### From source (local)
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/RajChowdhury240/catrole.git
 cd cat-role
 pip3 install .
 ```
