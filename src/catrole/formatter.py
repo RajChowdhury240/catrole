@@ -18,7 +18,7 @@ def print_table(rows: list[dict], entity_type: str, entity_name: str, account: s
         return
 
     title = f"IAM Permissions for {entity_type} \"{entity_name}\" in account {account}"
-    table = Table(title=title, show_lines=True, expand=True, title_style="bold cyan")
+    table = Table(title=title, show_lines=False, expand=True, title_style="bold cyan")
 
     table.add_column("#", style="dim", width=5, justify="right")
     table.add_column("Policy Name", style="bold white", max_width=30)

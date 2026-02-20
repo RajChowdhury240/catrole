@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from rich.console import Console
@@ -30,9 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Cross-account assume role
     parser.add_argument(
         "-R", "--assume-role",
-        required=True,
         metavar="ROLE",
-        help="IAM role name to assume in the target account(s) for cross-account access",
+        help="IAM role name to assume in the target account(s) for cross-account access "
+             "(falls back to ~/.catrole if not provided)",
     )
 
     # Mode 1: account + role/policy name
@@ -64,6 +65,15 @@ def main() -> None:
     args = parser.parse_args()
 
     assume_role_name = args.assume_role
+    if not assume_role_name:
+        catrole_file = os.path.expanduser("~/.catrole")
+        if os.path.isfile(catrole_file):
+            with open(catrole_file) as f:
+                assume_role_name = f.read().strip()
+        if not assume_role_name:
+            parser.error(
+                "-R/--assume-role is required (or set a default role in ~/.catrole)"
+            )
 
     # --- Mode 3: Search (org-wide or single account) ---
     if args.search:
