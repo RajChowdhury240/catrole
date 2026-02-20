@@ -34,7 +34,23 @@ pip3 install catrole
 
 ## Usage
 
-`catrole` requires `-R` to specify an IAM role to assume in the target account.
+`catrole` uses `-R` to specify an IAM role to assume in the target account.
+
+If `-R` is not provided, `catrole` reads the role name from `~/.catrole`.
+
+### Setting a default assume role
+
+```bash
+echo "my-readonly-role" > ~/.catrole
+```
+
+Once set, you can omit `-R` from all commands:
+
+```bash
+catrole -a 123456789012 -r MyAppRole
+```
+
+`-R` on the command line always takes precedence over `~/.catrole`.
 
 ### Scan a role
 
