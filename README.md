@@ -6,6 +6,11 @@
 
 AWS IAM Role/Policy permission viewer — see what a role or policy can do.
 
+#### Architectural Diagram
+
+<img width="2016" height="1674" alt="image" src="https://github.com/user-attachments/assets/85121686-4a3f-484c-9eab-2d5f5c946738" />
+
+
 ## Requirements
 
 - Python >= 3.11
