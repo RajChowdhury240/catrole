@@ -53,6 +53,8 @@ echo "readonly-role" > ~/.catrole
 
 Once set, you can omit `-R` from all commands:
 
+*where -a is account and -r is target role you're scanning for*
+
 ```bash
 catrole -a 123456789012 -r MyAppRole
 ```
@@ -60,6 +62,8 @@ catrole -a 123456789012 -r MyAppRole
 `-R` on the command line always takes precedence over `~/.catrole`.
 
 ### Scan a role
+
+*-R is the assume role you're using to switch to another account , -a is account and -r is target role you're scanning for*
 
 ```bash
 catrole -R readonly-role -a 123456789012 -r AppRole
@@ -72,13 +76,13 @@ catrole -R readonly-role -a 123456789012 -p Policy
 ```
 
 ### Scan by ARN
-
+* -A is ARN Mode*
 ```bash
 catrole -R readonly-role -A arn:aws:iam::123456789012:role/AppRole
 ```
 
 ### Search across all org accounts
-
+* -s is search mode*
 ```bash
 catrole -R readonly-role -s '*lambda*'
 ```
