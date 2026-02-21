@@ -8,8 +8,9 @@ authors = [
     {name = "Chowdhury Faizal Ahammed"},
     {name = "Neal Dreher"},
 ]
-version = "0.2.0"
+version = "0.2.1"
 description = "AWS IAM Role/Policy permission viewer — see what a role or policy can do"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.28",
