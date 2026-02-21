@@ -1,3 +1,4 @@
+import fnmatch
 import json
 import sys
 import urllib.parse
@@ -123,3 +124,75 @@ def _find_policy_arn(iam, policy_name: str) -> str:
 
     print(f"[error] Policy '{policy_name}' not found in Local or AWS scopes.", file=sys.stderr)
     sys.exit(1)
+
+
+def _action_matches(policy_action: str, search_pattern: str) -> bool:
+    """Bidirectional case-insensitive fnmatch for IAM actions.
+
+    Checks both directions so that a policy action like 's3:*' matches a
+    search for 's3:CreateBucket', and a search for 's3:*' matches a
+    specific policy action like 's3:CreateBucket'.
+    """
+    a = policy_action.lower()
+    p = search_pattern.lower()
+    return fnmatch.fnmatch(a, p) or fnmatch.fnmatch(p, a)
+
+
+def scan_role_for_action(session: boto3.Session, role_name: str,
+                         search_pattern: str, policy_cache: dict | None = None) -> list[dict]:
+    """Scan a role's policies and return rows where the action matches the search pattern.
+
+    Args:
+        session: Authenticated boto3 session.
+        role_name: IAM role to scan.
+        search_pattern: Action pattern (e.g. 's3:CreateBucket', 's3:*').
+        policy_cache: Optional dict keyed by policy ARN → list[dict] rows,
+                      shared across roles in the same account to avoid redundant API calls.
+
+    Returns:
+        List of permission row dicts that match the action pattern.
+    """
+    if policy_cache is None:
+        policy_cache = {}
+
+    iam = session.client("iam")
+    all_rows = []
+
+    try:
+        # Attached managed policies (paginated)
+        paginator = iam.get_paginator("list_attached_role_policies")
+        for page in paginator.paginate(RoleName=role_name):
+            for pol in page["AttachedPolicies"]:
+                arn = pol["PolicyArn"]
+                if arn in policy_cache:
+                    all_rows.extend(policy_cache[arn])
+                else:
+                    policy_type = "AWS Managed" if arn.startswith("arn:aws:iam::aws:") else "Customer Managed"
+                    rows = _get_policy_statements(iam, arn, pol["PolicyName"], policy_type)
+                    policy_cache[arn] = rows
+                    all_rows.extend(rows)
+
+        # Inline policies (paginated)
+        paginator = iam.get_paginator("list_role_policies")
+        for page in paginator.paginate(RoleName=role_name):
+            for pol_name in page["PolicyNames"]:
+                response = iam.get_role_policy(RoleName=role_name, PolicyName=pol_name)
+                document = _decode_policy_document(response["PolicyDocument"])
+                all_rows.extend(_flatten_statements(pol_name, "Inline", document))
+
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        msg = e.response["Error"]["Message"]
+        print(f"[error] Failed to scan role '{role_name}': {code} — {msg}", file=sys.stderr)
+        return []
+
+    # Filter rows by action match
+    matched = []
+    for row in all_rows:
+        action_value = row["Action"]
+        # Strip NotAction prefix for matching but keep it in output
+        raw_action = action_value.removeprefix("NotAction: ")
+        if _action_matches(raw_action, search_pattern):
+            matched.append(row)
+
+    return matched

@@ -6,6 +6,7 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
 from catrole.auth import assume_role
+from catrole.scanner import scan_role_for_action
 
 _MAX_WORKERS = 10
 
@@ -161,5 +162,112 @@ def search_all_accounts(pattern: str, role_name: str, account_id: str | None = N
                 results.append(result)
 
     # Sort by account name for consistent output
+    results.sort(key=lambda r: r["AccountName"])
+    return results
+
+
+def _find_action_in_account(account: dict, search_pattern: str, role_name: str) -> dict:
+    """Search a single account for roles whose policies match the given IAM action pattern.
+
+    Returns:
+        {
+            "AccountId": str,
+            "AccountName": str,
+            "matches": [{"RoleName": str, "rows": [dict, ...]}, ...],
+            "error": str | None,
+        }
+    """
+    account_id = account["Id"]
+    account_name = account["Name"]
+    result = {
+        "AccountId": account_id,
+        "AccountName": account_name,
+        "matches": [],
+        "error": None,
+    }
+
+    try:
+        session = assume_role(account_id, role_name)
+    except SystemExit:
+        result["error"] = f"Cannot assume {role_name}"
+        return result
+
+    iam = session.client("iam")
+    policy_cache: dict = {}
+
+    try:
+        paginator = iam.get_paginator("list_roles")
+        for page in paginator.paginate():
+            for role in page["Roles"]:
+                matched_rows = scan_role_for_action(
+                    session, role["RoleName"], search_pattern, policy_cache
+                )
+                if matched_rows:
+                    result["matches"].append({
+                        "RoleName": role["RoleName"],
+                        "rows": matched_rows,
+                    })
+    except ClientError as e:
+        result["error"] = f"Role listing failed: {e.response['Error']['Code']}"
+
+    return result
+
+
+def find_action_all_accounts(search_pattern: str, role_name: str,
+                             account_id: str | None = None,
+                             progress_callback=None) -> list[dict]:
+    """Search org accounts for roles with policies matching the IAM action pattern.
+
+    Args:
+        search_pattern: IAM action pattern (e.g. 's3:CreateBucket', 's3:*').
+        role_name: IAM role name to assume in each account.
+        account_id: Optional single account ID to scope the search to.
+        progress_callback: Optional callable(account_name, idx, total).
+
+    Returns list of result dicts (only those with matches).
+    """
+    if account_id:
+        account_name = account_id
+        try:
+            org = boto3.client("organizations")
+            desc = org.describe_account(AccountId=account_id)
+            account_name = desc["Account"]["Name"]
+        except Exception:
+            pass
+        accounts = [{"Id": account_id, "Name": account_name}]
+    else:
+        accounts = list_active_accounts()
+    total = len(accounts)
+
+    if not accounts:
+        print("[warn] No active accounts found in the organization.", file=sys.stderr)
+        return []
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+        future_to_acct = {
+            pool.submit(_find_action_in_account, acct, search_pattern, role_name): acct
+            for acct in accounts
+        }
+
+        for idx, future in enumerate(as_completed(future_to_acct), 1):
+            acct = future_to_acct[future]
+            if progress_callback:
+                progress_callback(acct["Name"], idx, total)
+
+            try:
+                result = future.result()
+            except Exception as exc:
+                result = {
+                    "AccountId": acct["Id"],
+                    "AccountName": acct["Name"],
+                    "matches": [],
+                    "error": str(exc),
+                }
+
+            if result["matches"]:
+                results.append(result)
+
     results.sort(key=lambda r: r["AccountName"])
     return results

@@ -6,9 +6,12 @@ from rich.console import Console
 
 from catrole import __version__
 from catrole.auth import assume_role
-from catrole.formatter import print_table, save_csv, print_search_results, save_search_csv
+from catrole.formatter import (
+    print_table, save_csv, print_search_results, save_search_csv,
+    print_action_search_results, save_action_search_csv,
+)
 from catrole.scanner import scan_policy, scan_role
-from catrole.search import search_all_accounts
+from catrole.search import search_all_accounts, find_action_all_accounts
 from catrole.utils import parse_arn, validate_account
 
 
@@ -23,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  catrole -R my-readonly-role -A arn:aws:iam::123456789012:role/MyAppRole\n"
             "  catrole -R my-readonly-role -s '*lambda*'\n"
             "  catrole -R my-readonly-role -s '*admin*' -a 123456789012\n"
+            "  catrole -R my-readonly-role -f 's3:CreateBucket'\n"
+            "  catrole -R my-readonly-role -f 's3:*' -a 123456789012\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -57,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
              "Searches all org accounts, or combine with -a to search a single account",
     )
 
+    # Mode 4: action search
+    action_group = parser.add_argument_group("action search mode")
+    action_group.add_argument(
+        "-f", "--find-action",
+        metavar="ACTION",
+        help="Find roles with policies matching an IAM action (e.g. 's3:CreateBucket', 's3:*'). "
+             "Searches all org accounts, or combine with -a to search a single account",
+    )
+
     return parser
 
 
@@ -74,6 +88,41 @@ def main() -> None:
             parser.error(
                 "-R/--assume-role is required (or set a default role in ~/.catrole)"
             )
+
+    # --- Mode 4: Action search (org-wide or single account) ---
+    if args.find_action:
+        if args.search or args.role or args.policy or args.arn:
+            parser.error("-f/--find-action cannot be combined with -s, -r, -p, or -A")
+
+        action_pattern = args.find_action
+        console = Console()
+
+        account_id = None
+        if args.account:
+            account_id = validate_account(args.account)
+            console.print(f"\n[bold cyan]Searching account {account_id} for action:[/bold cyan] [yellow]{action_pattern}[/yellow]")
+        else:
+            console.print(f"\n[bold cyan]Searching all org accounts for action:[/bold cyan] [yellow]{action_pattern}[/yellow]")
+        console.print(f"[bold cyan]Assuming role:[/bold cyan] [yellow]{assume_role_name}[/yellow]\n")
+
+        def _action_progress(name, idx, total):
+            console.print(f"  [{idx}/{total}] Scanning [bold]{name}[/bold] …", highlight=False)
+
+        results = find_action_all_accounts(
+            action_pattern, role_name=assume_role_name,
+            account_id=account_id, progress_callback=_action_progress,
+        )
+
+        for r in results:
+            if r.get("error"):
+                console.print(f"  [dim red]⚠ {r['AccountName']} ({r['AccountId']}): {r['error']}[/dim red]")
+
+        print_action_search_results(results, action_pattern)
+
+        csv_path = save_action_search_csv(results, action_pattern)
+        if csv_path:
+            console.print(f"CSV saved to: {csv_path}")
+        return
 
     # --- Mode 3: Search (org-wide or single account) ---
     if args.search:

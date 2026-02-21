@@ -173,3 +173,103 @@ def save_search_csv(results: list[dict], pattern: str) -> str | None:
         writer.writerows(all_rows)
 
     return filepath
+
+
+def print_action_search_results(results: list[dict], pattern: str) -> None:
+    """Print action search results as a single rich table."""
+    console = Console()
+
+    flat_rows = []
+    for r in results:
+        for match in r["matches"]:
+            for row in match["rows"]:
+                flat_rows.append({
+                    "AccountName": r["AccountName"],
+                    "AccountId": r["AccountId"],
+                    "RoleName": match["RoleName"],
+                    **row,
+                })
+
+    if not flat_rows:
+        console.print(f"\n[yellow]No roles with action matching '{pattern}' found.[/yellow]\n")
+        return
+
+    table = Table(
+        title=f"Roles with action matching \"{pattern}\"",
+        expand=True,
+        title_style="bold cyan",
+    )
+    table.add_column("#", style="dim", width=5, justify="right")
+    table.add_column("Account", style="bold white", max_width=25)
+    table.add_column("Account ID", style="magenta", max_width=14)
+    table.add_column("Role", style="cyan", max_width=30)
+    table.add_column("Policy", style="bold white", max_width=25)
+    table.add_column("Effect", max_width=8)
+    table.add_column("Action", style="cyan", max_width=40)
+    table.add_column("Resource", style="green", max_width=45)
+    table.add_column("Condition", style="yellow", max_width=35)
+
+    for idx, row in enumerate(flat_rows, 1):
+        effect_style = "bold green" if row["Effect"] == "Allow" else "bold red"
+        effect_text = Text(row["Effect"], style=effect_style)
+        condition_display = row["Condition"] if row["Condition"] != "-" else "-"
+
+        table.add_row(
+            str(idx),
+            row["AccountName"],
+            row["AccountId"],
+            row["RoleName"],
+            row["PolicyName"],
+            effect_text,
+            row["Action"],
+            row["Resource"],
+            condition_display,
+        )
+
+    console.print()
+    console.print(table)
+
+    role_count = sum(len(r["matches"]) for r in results)
+    account_count = len(results)
+    console.print(
+        f"\n[bold]{len(flat_rows)}[/bold] permission entries across "
+        f"[bold]{role_count}[/bold] role(s) in "
+        f"[bold]{account_count}[/bold] account(s).\n"
+    )
+
+
+def save_action_search_csv(results: list[dict], pattern: str) -> str | None:
+    """Save action search results to CSV. Returns filepath or None if no results."""
+    flat_rows = []
+    for r in results:
+        for match in r["matches"]:
+            for row in match["rows"]:
+                flat_rows.append({
+                    "AccountName": r["AccountName"],
+                    "AccountId": r["AccountId"],
+                    "RoleName": match["RoleName"],
+                    "PolicyName": row["PolicyName"],
+                    "PolicyType": row["PolicyType"],
+                    "Effect": row["Effect"],
+                    "Action": row["Action"],
+                    "Resource": row["Resource"],
+                    "Condition": row["Condition"],
+                })
+
+    if not flat_rows:
+        return None
+
+    safe_pattern = pattern.replace("*", "STAR").replace("?", "Q").replace("/", "_").replace(":", "-")
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    filename = f"iam-action-search_{safe_pattern}_{timestamp}.csv"
+    filepath = os.path.join(os.getcwd(), filename)
+
+    fieldnames = ["AccountName", "AccountId", "RoleName", "PolicyName", "PolicyType",
+                  "Effect", "Action", "Resource", "Condition"]
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(flat_rows)
+
+    return filepath

@@ -93,6 +93,22 @@ catrole -R readonly-role -s '*lambda*'
 catrole -R readonly-role -s '*admin*' -a 123456789012
 ```
 
+### Find roles by IAM action
+
+Search across all org accounts for roles that can perform a specific action:
+* -f is action search mode*
+
+```bash
+catrole -R readonly-role -f 's3:CreateBucket'
+```
+
+Use wildcards to find broader action patterns:
+
+```bash
+catrole -R readonly-role -f 's3:*' -a 123456789012
+catrole -R readonly-role -f '*lambda*'
+```
+
 Results are printed as a table and automatically saved to a CSV file.
 
 Run `catrole -h` for full help.
