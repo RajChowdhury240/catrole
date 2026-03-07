@@ -9,8 +9,12 @@ from catrole.auth import assume_role
 from catrole.formatter import (
     print_table, save_csv, print_search_results, save_search_csv,
     print_action_search_results, save_action_search_csv,
+    print_user_details, save_user_csv,
+    print_group_details, save_group_csv,
+    print_permission_set_details, save_permission_set_csv,
 )
-from catrole.scanner import scan_policy, scan_role
+from catrole.idc_scanner import scan_permission_set
+from catrole.scanner import scan_policy, scan_role, scan_user, scan_group
 from catrole.search import search_all_accounts, find_action_all_accounts
 from catrole.utils import parse_arn, validate_account
 
@@ -28,6 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
             "  catrole -R my-readonly-role -s '*admin*' -a 123456789012\n"
             "  catrole -R my-readonly-role -f 's3:CreateBucket'\n"
             "  catrole -R my-readonly-role -f 's3:*' -a 123456789012\n"
+            "  catrole -R my-readonly-role -a 123456789012 -u john.doe\n"
+            "  catrole -R my-readonly-role -a 123456789012 -g MyDevGroup\n"
+            "  catrole -R my-readonly-role -a 123456789012 -P MyPermissionSet --region us-east-1\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -71,6 +78,38 @@ def build_parser() -> argparse.ArgumentParser:
              "Searches all org accounts, or combine with -a to search a single account",
     )
 
+    # Mode 5: IAM user scan
+    user_group = parser.add_argument_group("user mode")
+    user_group.add_argument(
+        "-u", "--user",
+        metavar="USER",
+        help="IAM user name to scan — shows user info, access keys, MFA devices, "
+             "group memberships, and all effective permissions (requires -a)",
+    )
+
+    # Mode 6: IAM group scan
+    group_group = parser.add_argument_group("group mode")
+    group_group.add_argument(
+        "-g", "--group",
+        metavar="GROUP",
+        help="IAM group name to scan — shows group info, members, and all permissions (requires -a)",
+    )
+
+    # Mode 7: IDC permission set scan
+    idc_group = parser.add_argument_group("IDC permission set mode")
+    idc_group.add_argument(
+        "-P", "--permission-set",
+        metavar="NAME",
+        help="AWS Identity Center permission set name to scan — shows policies, "
+             "provisioned accounts, and all principal assignments (requires -a for the IDC management/delegated-admin account)",
+    )
+    idc_group.add_argument(
+        "--region",
+        metavar="REGION",
+        help="AWS region where Identity Center is configured (e.g. us-east-1). "
+             "Required when your IDC instance is not in your default region.",
+    )
+
     return parser
 
 
@@ -88,6 +127,51 @@ def main() -> None:
             parser.error(
                 "-R/--assume-role is required (or set a default role in ~/.catrole)"
             )
+
+    # --- Mode 5: IAM User scan ---
+    if args.user:
+        if any([args.search, args.find_action, args.role, args.policy, args.arn, args.group, args.permission_set]):
+            parser.error("-u/--user cannot be combined with other scan modes")
+        if not args.account:
+            parser.error("-u/--user requires -a/--account")
+        account = validate_account(args.account)
+        session = assume_role(account, assume_role_name)
+        data = scan_user(session, args.user)
+        print_user_details(data, account)
+        csv_path = save_user_csv(data, account, args.user)
+        if csv_path:
+            print(f"CSV saved to: {csv_path}")
+        return
+
+    # --- Mode 6: IAM Group scan ---
+    if args.group:
+        if any([args.search, args.find_action, args.role, args.policy, args.arn, args.user, args.permission_set]):
+            parser.error("-g/--group cannot be combined with other scan modes")
+        if not args.account:
+            parser.error("-g/--group requires -a/--account")
+        account = validate_account(args.account)
+        session = assume_role(account, assume_role_name)
+        data = scan_group(session, args.group)
+        print_group_details(data, account)
+        csv_path = save_group_csv(data, account, args.group)
+        if csv_path:
+            print(f"CSV saved to: {csv_path}")
+        return
+
+    # --- Mode 7: IDC Permission Set scan ---
+    if args.permission_set:
+        if any([args.search, args.find_action, args.role, args.policy, args.arn, args.user, args.group]):
+            parser.error("-P/--permission-set cannot be combined with other scan modes")
+        if not args.account:
+            parser.error("-P/--permission-set requires -a/--account (your IDC management or delegated-admin account)")
+        account = validate_account(args.account)
+        session = assume_role(account, assume_role_name)
+        data = scan_permission_set(session, args.permission_set, region=args.region)
+        print_permission_set_details(data, account)
+        csv_path = save_permission_set_csv(data, account, args.permission_set)
+        if csv_path:
+            print(f"CSV saved to: {csv_path}")
+        return
 
     # --- Mode 4: Action search (org-wide or single account) ---
     if args.find_action:

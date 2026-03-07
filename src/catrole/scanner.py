@@ -126,6 +126,165 @@ def _find_policy_arn(iam, policy_name: str) -> str:
     sys.exit(1)
 
 
+def scan_user(session: boto3.Session, user_name: str) -> dict:
+    """Scan an IAM user: info, groups, access keys, MFA devices, and all permission rows.
+
+    Returns:
+        {
+            "user": dict,
+            "groups": [dict, ...],
+            "access_keys": [dict, ...],
+            "mfa_devices": [dict, ...],
+            "direct_policies": [row_dict, ...],
+            "group_policies": {group_name: [row_dict, ...]},
+        }
+    """
+    iam = session.client("iam")
+
+    try:
+        user = iam.get_user(UserName=user_name)["User"]
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        msg = e.response["Error"]["Message"]
+        print(f"[error] Failed to get user '{user_name}': {code} — {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    # Group memberships
+    groups = []
+    paginator = iam.get_paginator("list_groups_for_user")
+    for page in paginator.paginate(UserName=user_name):
+        groups.extend(page["Groups"])
+
+    # Access keys + last-used info
+    access_keys = []
+    paginator = iam.get_paginator("list_access_keys")
+    for page in paginator.paginate(UserName=user_name):
+        for key in page["AccessKeyMetadata"]:
+            info = dict(key)
+            try:
+                lu = iam.get_access_key_last_used(AccessKeyId=key["AccessKeyId"]).get("AccessKeyLastUsed", {})
+                info["LastUsedDate"] = lu.get("LastUsedDate", "Never")
+                info["LastUsedRegion"] = lu.get("Region", "N/A")
+                info["LastUsedService"] = lu.get("ServiceName", "N/A")
+            except ClientError:
+                info["LastUsedDate"] = "Unknown"
+                info["LastUsedRegion"] = "N/A"
+                info["LastUsedService"] = "N/A"
+            access_keys.append(info)
+
+    # MFA devices
+    mfa_devices = []
+    paginator = iam.get_paginator("list_mfa_devices")
+    for page in paginator.paginate(UserName=user_name):
+        mfa_devices.extend(page["MFADevices"])
+
+    # Direct attached managed policies
+    direct_rows = []
+    paginator = iam.get_paginator("list_attached_user_policies")
+    for page in paginator.paginate(UserName=user_name):
+        for pol in page["AttachedPolicies"]:
+            policy_type = "AWS Managed" if pol["PolicyArn"].startswith("arn:aws:iam::aws:") else "Customer Managed"
+            direct_rows.extend(_get_policy_statements(iam, pol["PolicyArn"], pol["PolicyName"], policy_type))
+
+    # Direct inline policies
+    paginator = iam.get_paginator("list_user_policies")
+    for page in paginator.paginate(UserName=user_name):
+        for pol_name in page["PolicyNames"]:
+            resp = iam.get_user_policy(UserName=user_name, PolicyName=pol_name)
+            document = _decode_policy_document(resp["PolicyDocument"])
+            direct_rows.extend(_flatten_statements(pol_name, "Inline", document))
+
+    # Group-inherited policies (attached + inline per group)
+    group_policies: dict[str, list[dict]] = {}
+    for grp in groups:
+        grp_name = grp["GroupName"]
+        g_rows: list[dict] = []
+        try:
+            paginator = iam.get_paginator("list_attached_group_policies")
+            for page in paginator.paginate(GroupName=grp_name):
+                for pol in page["AttachedPolicies"]:
+                    policy_type = "AWS Managed" if pol["PolicyArn"].startswith("arn:aws:iam::aws:") else "Customer Managed"
+                    g_rows.extend(_get_policy_statements(iam, pol["PolicyArn"], pol["PolicyName"], policy_type))
+        except ClientError:
+            pass
+        try:
+            paginator = iam.get_paginator("list_group_policies")
+            for page in paginator.paginate(GroupName=grp_name):
+                for pol_name in page["PolicyNames"]:
+                    resp = iam.get_group_policy(GroupName=grp_name, PolicyName=pol_name)
+                    document = _decode_policy_document(resp["PolicyDocument"])
+                    g_rows.extend(_flatten_statements(pol_name, "Inline", document))
+        except ClientError:
+            pass
+        group_policies[grp_name] = g_rows
+
+    return {
+        "user": user,
+        "groups": groups,
+        "access_keys": access_keys,
+        "mfa_devices": mfa_devices,
+        "direct_policies": direct_rows,
+        "group_policies": group_policies,
+    }
+
+
+def scan_group(session: boto3.Session, group_name: str) -> dict:
+    """Scan an IAM group: info, members, and all permission rows.
+
+    Returns:
+        {
+            "group": dict,
+            "members": [dict, ...],
+            "policies": [row_dict, ...],
+        }
+    """
+    iam = session.client("iam")
+
+    group = None
+    members: list[dict] = []
+    try:
+        resp = iam.get_group(GroupName=group_name)
+        group = resp["Group"]
+        members.extend(resp["Users"])
+        while resp.get("IsTruncated"):
+            resp = iam.get_group(GroupName=group_name, Marker=resp["Marker"])
+            members.extend(resp["Users"])
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        msg = e.response["Error"]["Message"]
+        print(f"[error] Failed to get group '{group_name}': {code} — {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    rows: list[dict] = []
+
+    # Attached managed policies
+    try:
+        paginator = iam.get_paginator("list_attached_group_policies")
+        for page in paginator.paginate(GroupName=group_name):
+            for pol in page["AttachedPolicies"]:
+                policy_type = "AWS Managed" if pol["PolicyArn"].startswith("arn:aws:iam::aws:") else "Customer Managed"
+                rows.extend(_get_policy_statements(iam, pol["PolicyArn"], pol["PolicyName"], policy_type))
+    except ClientError as e:
+        print(f"[warn] Could not list attached group policies: {e.response['Error']['Code']}", file=sys.stderr)
+
+    # Inline policies
+    try:
+        paginator = iam.get_paginator("list_group_policies")
+        for page in paginator.paginate(GroupName=group_name):
+            for pol_name in page["PolicyNames"]:
+                resp_pol = iam.get_group_policy(GroupName=group_name, PolicyName=pol_name)
+                document = _decode_policy_document(resp_pol["PolicyDocument"])
+                rows.extend(_flatten_statements(pol_name, "Inline", document))
+    except ClientError as e:
+        print(f"[warn] Could not list inline group policies: {e.response['Error']['Code']}", file=sys.stderr)
+
+    return {
+        "group": group,
+        "members": members,
+        "policies": rows,
+    }
+
+
 def _action_matches(policy_action: str, search_pattern: str) -> bool:
     """Bidirectional case-insensitive fnmatch for IAM actions.
 
